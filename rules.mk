@@ -1,6 +1,9 @@
 
 
-parallel_array_iter.src = parallel_array_iter.cpp
+# parallel_array_iter.src = parallel_array_iter.cpp
 
-$(call exec,parallel_array_iter)
+# $(call exec,parallel_array_iter)
 
+CPPFLAGS = -Iinclude
+
+$(subdirs)
