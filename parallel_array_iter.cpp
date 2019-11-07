@@ -1,6 +1,15 @@
 #include <utility>
 #include <tuple>
 #include <algorithm>
+#include <string>
+#include <array>
+
+template<typename Op, std::size_t... idx>
+static constexpr auto applyIndex(
+    Op&& op, std::index_sequence<idx...> i)
+{
+    return op(std::integral_constant<std::size_t, idx>{}...);
+}
 
 template<typename... Ts>
 struct ParallelArrayReference: std::tuple<Ts&...>
@@ -11,32 +20,36 @@ struct ParallelArrayReference: std::tuple<Ts&...>
     operator std::tuple<Ts...>() const { return *this; }
 };
 
-template<typename... Ts>
-struct ParallelArrayIterator: std::tuple<Ts*...>
+namespace std
 {
-    using std::tuple<Ts*...>::tuple;
+template<typename... Ts>
+void swap(
+    ParallelArrayReference<Ts...>&& lhs, 
+    ParallelArrayReference<Ts...>&& rhs)
+{
+    std::swap(lhs, rhs);
+}
+}
+
+template<typename... Is>
+struct ParallelArrayIterator: std::tuple<Is...>
+{
+    using std::tuple<Is...>::tuple;
     
-    using value_type        = std::tuple<Ts...>;
+    using value_type        = std::tuple<
+        typename std::iterator_traits<Is>::value_type...>;
     using difference_type   = std::ptrdiff_t;
     using pointer           = void;
-    using reference         = ParallelArrayReference<Ts...>;
+    using reference         = ParallelArrayReference<
+        typename std::iterator_traits<Is>::value_type...>;
     using iterator_category = std::random_access_iterator_tag;
 
-    using Index = std::index_sequence_for<Ts...>;
-
-    static constexpr auto makeIndex(){ return Index{}; }
-
-    template<typename Op, std::size_t... idx>
-    static constexpr auto forEachIndexImpl(
-        Op&& op, std::index_sequence<idx...> i)
-    {
-        return op(std::integral_constant<std::size_t, idx>{}...);
-    }
+    using Index = std::index_sequence_for<Is...>;
 
     template<typename Op>
-    static constexpr auto forEachIndex(Op&& op)
+    static constexpr auto forEachIter(Op&& op)
     {
-        return forEachIndexImpl(std::forward<Op>(op), Index{});
+        return applyIndex(std::forward<Op>(op), Index{});
     }
 
     template<typename... X>
@@ -44,7 +57,7 @@ struct ParallelArrayIterator: std::tuple<Ts*...>
 
     auto makeReference() const
     {
-        return forEachIndex(
+        return forEachIter(
             [&](auto... idx){ return reference{*std::get<idx>(*this)...}; });
     }
 
@@ -52,7 +65,7 @@ struct ParallelArrayIterator: std::tuple<Ts*...>
 
     friend auto operator+(const ParallelArrayIterator& lhs, int rhs)
     {
-        return forEachIndex(
+        return forEachIter(
             [&lhs, rhs](auto... idx)
             {
                 return ParallelArrayIterator{(std::get<idx>(lhs) + rhs)...};
@@ -61,7 +74,7 @@ struct ParallelArrayIterator: std::tuple<Ts*...>
 
     auto operator+=(int rhs)
     {
-        return forEachIndex(
+        return forEachIter(
             [&](auto... idx)
             {
                 expandPack(std::get<idx>(*this) += rhs...);
@@ -70,6 +83,7 @@ struct ParallelArrayIterator: std::tuple<Ts*...>
     }
 
     auto operator++(){ return operator+=(1); }
+    auto operator--(){ return operator+=(-1); }
 
     friend auto operator-(const ParallelArrayIterator& lhs,
         const ParallelArrayIterator& rhs)
@@ -81,72 +95,103 @@ struct ParallelArrayIterator: std::tuple<Ts*...>
     {
         return lhs + -rhs;
     }
-
-    auto operator--()
-    {
-        return operator+=(-1);
-    }
 };
-
 #if 1
-namespace std
-{
 template<typename... Ts>
-void swap(
-    ParallelArrayReference<Ts...>&& lhs, 
-    ParallelArrayReference<Ts...>&& rhs)
+auto begin(Ts&... arrays)
+    -> ParallelArrayIterator<decltype(std::begin(arrays))...>
 {
-    std::tuple<Ts...> tmp{static_cast<std::tuple<Ts&...> >(lhs)};
-    lhs = rhs;
-    rhs = tmp;
+    return { std::begin(arrays)... };
 }
+
+template<typename... Ts>
+auto end(Ts&... arrays)
+    -> ParallelArrayIterator<decltype(std::end(arrays))...>
+{
+    return { std::end(arrays)... };
 }
-#endif
 
 template<std::size_t size, typename... Ts>
 auto begin(Ts (&...arrays)[size])
+    -> ParallelArrayIterator<decltype(std::begin(arrays))...>
 {
-    return ParallelArrayIterator<Ts...>{arrays...};
+    return { std::begin(arrays)... };
 }
 
 template<std::size_t size, typename... Ts>
 auto end(Ts (&...arrays)[size])
+    -> ParallelArrayIterator<decltype(std::end(arrays))...>
 {
-    return ParallelArrayIterator<Ts...>{std::end(arrays)...};
+    return { std::end(arrays)... };
 }
 
+#else
+template< class C >
+auto begin( C& c ) -> decltype(c.begin())
+{
+    return c.begin();
+}
+
+template< class C >
+auto end( C& c ) -> decltype(c.end())
+{
+    return c.end();
+}
+
+#endif
 constexpr auto size = 1024;
 
-char keys[size];
-uint64_t values[size];
+char keys[size] = {0};
+uint64_t values[size] = {0};
+std::string names[size];
+std::array<double, size> prices = {0};
 
-void test()
+auto cmp1st = [](const auto &lhs, const auto& rhs)
+{ return std::get<0>(lhs) < std::get<0>(rhs); };
+
+auto test()
 {
-    auto i = begin(keys, values);
+    auto i = begin(keys, values, names, prices);
+    auto e = end(keys, values, names, prices);    
     auto d = i - i;
     auto j = i - 1;
 
     std::swap(i, j);
 
-    i.makeIndex();
-
     i += 1;
+
+    return std::get<3>(*i);
 }
 
-void bar()
-{
-    using Tup = std::tuple<int, char, bool>;
-    Tup t1;
-    Tup t2;
-    std::swap(t1, t2);
-}
 #if 1
-void foo()
+auto foo()
 {
     std::sort(
-        begin(keys, values),
-        end(keys,values),
-        [](const auto &lhs, const auto& rhs)
-        { return std::get<0>(lhs) < std::get<0>(rhs); });
+        begin(keys, values, names, prices),
+        end(keys,values, names, prices),
+        cmp1st);
+}
+#if 0
+auto foo2()
+{
+    auto found = std::lower_bound(
+        begin(keys, values, names, prices),
+        end(keys,values, names, prices),
+        std::make_tuple('A'),
+        cmp1st);
+    return found == end(keys, values, names, prices) ? 3.14 : 
+        *std::get<3>(found);
+}
+#else
+auto foo2()
+{
+    return std::get<1>(
+        std::lower_bound(
+            begin(keys, values, names, prices),
+            end(keys,values, names, prices),
+            std::make_tuple('A'),
+            cmp1st));
 }
 #endif
+#endif
+
