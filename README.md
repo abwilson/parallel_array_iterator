@@ -56,4 +56,5 @@ auto example()
             end(keys, values, flags, names),
             std::make_tuple(42),
             cmp1st));
+}
 ```
